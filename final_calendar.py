@@ -7,6 +7,7 @@ from googleapiclient.discovery import build
 import google.oauth2.credentials
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from dateutil.parser import parse as parse_date
 
 load_dotenv()
 
@@ -70,6 +71,59 @@ def get_current_month_range():
 
     time_max = next_month - timedelta(seconds=1)
     return time_min.isoformat() + 'Z', time_max.isoformat() + 'Z'
+
+def get_date_range(range_type):
+    now = datetime.utcnow()
+
+    if range_type == "today":
+        start = datetime(now.year, now.month, now.day)
+        end = start + timedelta(days=1) - timedelta(seconds=1)
+    elif range_type == "this_week":
+        start = now - timedelta(days=now.weekday())  # Monday
+        start = datetime(start.year, start.month, start.day)
+        end = start + timedelta(days=7) - timedelta(seconds=1)
+    elif range_type == "this_month":
+        start = datetime(now.year, now.month, 1)
+        if now.month == 12:
+            end = datetime(now.year + 1, 1, 1) - timedelta(seconds=1)
+        else:
+            end = datetime(now.year, now.month + 1, 1) - timedelta(seconds=1)
+    else:
+        try:
+            parsed_date = parse_date(range_type)
+            start = datetime(parsed_date.year, parsed_date.month, parsed_date.day)
+            end = start + timedelta(days=1) - timedelta(seconds=1)
+        except:
+            # Default to this month if parsing fails
+            start = datetime(now.year, now.month, 1)
+            if now.month == 12:
+                end = datetime(now.year + 1, 1, 1) - timedelta(seconds=1)
+            else:
+                end = datetime(now.year, now.month + 1, 1) - timedelta(seconds=1)
+
+    return start.isoformat() + 'Z', end.isoformat() + 'Z'
+
+
+def interpret_natural_query(query_text):
+    """
+    Convert natural query to one of 'today', 'this_week', 'this_month', or date string
+    """
+    query_text = query_text.lower().strip()
+
+    if "today" in query_text:
+        return "today"
+    elif "week" in query_text:
+        return "this_week"
+    elif "month" in query_text:
+        return "this_month"
+    else:
+        # Extract possible date
+        match = re.search(r'\d{4}-\d{2}-\d{2}', query_text)
+        if match:
+            return match.group()
+        return "this_month"
+
+
 
 @app.route("/authorize")
 def authorize():
@@ -151,9 +205,37 @@ def create_event():
     created_event = service.events().insert(calendarId="primary", body=event).execute()
     return jsonify(created_event)
 
+# @app.route("/fetch_events", methods=["GET"])
+# def fetch_events():
+#     email = request.args.get("email")
+#     if not email:
+#         return jsonify({"error": "Missing email in query params"}), 400
+
+#     user_creds = UserCredentials.query.filter_by(user_email=email).first()
+#     if not user_creds:
+#         return redirect('/authorize')
+
+#     creds = google.oauth2.credentials.Credentials(**user_creds.to_dict())
+#     service = build('calendar', 'v3', credentials=creds)
+
+#     time_min, time_max = get_current_month_range()
+
+#     events_result = service.events().list(
+#         calendarId='primary',
+#         timeMin=time_min,
+#         timeMax=time_max,
+#         singleEvents=True,
+#         orderBy='startTime'
+#     ).execute()
+
+#     events = events_result.get('items', [])
+#     return jsonify(events)
+
 @app.route("/fetch_events", methods=["GET"])
 def fetch_events():
     email = request.args.get("email")
+    user_query = request.args.get("query", "this month")  # Accept natural query
+
     if not email:
         return jsonify({"error": "Missing email in query params"}), 400
 
@@ -164,7 +246,8 @@ def fetch_events():
     creds = google.oauth2.credentials.Credentials(**user_creds.to_dict())
     service = build('calendar', 'v3', credentials=creds)
 
-    time_min, time_max = get_current_month_range()
+    range_type = interpret_natural_query(user_query)
+    time_min, time_max = get_date_range(range_type)
 
     events_result = service.events().list(
         calendarId='primary',
