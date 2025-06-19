@@ -8,6 +8,7 @@ import google.oauth2.credentials
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from dateutil.parser import parse as parse_date
+import re
 
 load_dotenv()
 
@@ -105,9 +106,6 @@ def get_date_range(range_type):
 
 
 def interpret_natural_query(query_text):
-    """
-    Convert natural query to one of 'today', 'this_week', 'this_month', or date string
-    """
     query_text = query_text.lower().strip()
 
     if "today" in query_text:
@@ -116,11 +114,18 @@ def interpret_natural_query(query_text):
         return "this_week"
     elif "month" in query_text:
         return "this_month"
+    elif "year" in query_text:
+        return "this_year"
     else:
-        # Extract possible date
+        # Match YYYY-MM-DD or similar formats
         match = re.search(r'\d{4}-\d{2}-\d{2}', query_text)
         if match:
-            return match.group()
+            try:
+                # Validate the date
+                datetime.strptime(match.group(), "%Y-%m-%d")
+                return match.group()
+            except ValueError:
+                pass
         return "this_month"
 
 
